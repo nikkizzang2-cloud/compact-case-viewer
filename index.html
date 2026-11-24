@@ -34,7 +34,8 @@
   /* 페이지 바깥 여분 영역(브라우저 하단 띠 등)도 배경 아래쪽 색 흐름 그대로 채움
      (배경 이미지 맨 아래 줄 색을 가로 그라데이션으로, 세로로 반복) */
   html {
-    background: linear-gradient(to right, #979298 0%, #827d83 25%, #625d63 50%, #605e62 75%, #272629 100%);
+    background-color: #5f5b61; /* 페이지 바깥(브라우저가 덧붙이는 영역)은 이 단색으로 칠해짐 */
+    background-image: linear-gradient(to right, #979298 0%, #827d83 25%, #625d63 50%, #605e62 75%, #272629 100%);
   }
   html, body {
     margin: 0; width: 100%; height: 100%; overflow: hidden;
