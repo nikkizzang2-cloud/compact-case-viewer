@@ -22,7 +22,7 @@
     --bg-fallback: #57535b; /* 혹시 비는 곳이 생겨도 배경 아래쪽과 비슷한 색이라 티 안 나게 */
     /* 배경 위에 덧씌우는 효과 (블렌더 렌더 배경을 그대로 보이게 지금은 모두 0)
        위 어둡게 / 아래 밝게 / 버건디 기운: 0~1 */
-    --bg-top-dark: 0;
+    --bg-top-dark: 0.18;
     --bg-bottom-light: 0;
     --bg-tint: 0;
     /* 아이패드 웹앱(홈 화면)에서 위 상태바·아래 홈 막대 영역까지 덮도록 바깥으로 늘림 */
@@ -456,10 +456,37 @@ function domeSurface(mesh, cfg) {
   const flat = (i) => t.fromBufferAttribute(pos, i).clone().applyQuaternion(q);
   const segs = [];
   for (const e of edges.values()) if (e.n === 1) { const A = flat(e.a), B = flat(e.b); segs.push([A.x, A.y, B.x, B.y]); }
-  // 3) 테두리까지 거리에 따라 아래로 휘고, 법선을 바깥으로 기울임
-  for (let i = 0; i < pos.count; i++) {
-    if (!isTop[i]) continue;
-    const p = flat(i);
+  // 3) 윗면 삼각형을 잘게 쪼갬: 원래 삼각형이 커서(한 변 최대 8), 휜 부분 경계에서
+  //    삼각형 모양대로 톱니처럼 깨져 보였음 → 모든 윗면 삼각형을 똑같이 4^SUB개로 나눠 곡면을 매끈하게
+  const SUB = 2;
+  const src = geo.index ? geo.toNonIndexed() : geo;
+  const sp = src.attributes.position, sn = src.attributes.normal, su = src.attributes.uv;
+  const P = [], N = [], U = [];
+  const vtx = (i) => ({ p: new THREE.Vector3().fromBufferAttribute(sp, i), n: new THREE.Vector3().fromBufferAttribute(sn, i),
+                        u: su ? new THREE.Vector2().fromBufferAttribute(su, i) : new THREE.Vector2() });
+  const mid = (a, b) => ({ p: a.p.clone().add(b.p).multiplyScalar(0.5), n: a.n.clone().add(b.n).normalize(), u: a.u.clone().add(b.u).multiplyScalar(0.5) });
+  const push = (...vs) => vs.forEach((v) => { P.push(v.p.x, v.p.y, v.p.z); N.push(v.n.x, v.n.y, v.n.z); U.push(v.u.x, v.u.y); });
+  const split = (a, b, c, d) => {
+    if (d === 0) return push(a, b, c);
+    const ab = mid(a, b), bc = mid(b, c), ca = mid(c, a);
+    split(a, ab, ca, d - 1); split(ab, b, bc, d - 1); split(ca, bc, c, d - 1); split(ab, bc, ca, d - 1);
+  };
+  for (let i = 0; i < sp.count; i += 3) {
+    const a = vtx(i), b = vtx(i + 1), c = vtx(i + 2);
+    const top = [a, b, c].every((v) => v.n.dot(n) > 0.99);
+    if (top) split(a, b, c, SUB); else push(a, b, c);
+  }
+  const g2 = new THREE.BufferGeometry();
+  g2.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+  g2.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
+  g2.setAttribute('uv', new THREE.Float32BufferAttribute(U, 2));
+  mesh.geometry = g2;
+  const pos2 = g2.attributes.position, nor2 = g2.attributes.normal;
+  const flat2 = (i) => t.fromBufferAttribute(pos2, i).clone().applyQuaternion(q);
+  // 4) 테두리까지 거리에 따라 휘고(높이), 법선을 그 기울기에 맞춰 기울임
+  for (let i = 0; i < pos2.count; i++) {
+    if (t.fromBufferAttribute(nor2, i).dot(n) <= 0.99) continue;
+    const p = flat2(i);
     let bd = Infinity, bx = 0, by = 0;
     for (const [x1, y1, x2, y2] of segs) {
       const dx = x2 - x1, dy = y2 - y1;
@@ -472,11 +499,12 @@ function domeSurface(mesh, cfg) {
     p.z -= cfg.depth * f * f;
     const ang = cfg.tilt * f;
     const nl = new THREE.Vector3(bx / len * Math.sin(ang), by / len * Math.sin(ang), Math.cos(ang));
-    p.applyQuaternion(qi); pos.setXYZ(i, p.x, p.y, p.z);
-    nl.applyQuaternion(qi); nor.setXYZ(i, nl.x, nl.y, nl.z);
+    p.applyQuaternion(qi); pos2.setXYZ(i, p.x, p.y, p.z);
+    nl.applyQuaternion(qi); nor2.setXYZ(i, nl.x, nl.y, nl.z);
   }
-  pos.needsUpdate = true; nor.needsUpdate = true;
-  geo.computeBoundingSphere();
+  g2.computeBoundingSphere();
+  if (geo !== src) src.dispose();
+  geo.dispose();
 }
 
 function makeBalmSurfaceTexture(seed) {
