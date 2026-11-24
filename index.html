@@ -36,7 +36,7 @@
         rgba(0, 0, 0, var(--bg-top-dark)) 0%,
         rgba(0, 0, 0, 0) 55%,
         rgba(255, 255, 255, var(--bg-bottom-light)) 100%),
-      var(--bg-fallback) url('background-render.jpg') center / cover no-repeat;
+      var(--bg-fallback) url('background-render2.jpg') center / cover no-repeat;
   }
   html:fullscreen, html:-webkit-full-screen { width: 100%; height: 100%; }
   html::backdrop { background: var(--bg-fallback); }
@@ -116,12 +116,11 @@ const LOOK = {
 
 const stage = document.getElementById('stage');
 
-// 아이패드처럼 화면 밀도가 2배 이상이면 계단 현상이 거의 안 보여서 안티앨리어싱(무거움)을 끔
 const renderer = new THREE.WebGLRenderer({
-  antialias: window.devicePixelRatio < 2, alpha: true, powerPreference: 'high-performance',
+  antialias: true, alpha: true, powerPreference: 'high-performance',
 });
 const DPR_FULL = Math.min(window.devicePixelRatio, 2);     // 멈춰 있을 때: 선명하게
-const DPR_MOVING = 1; // 돌리거나 여닫는 중: 가볍게 (멈추면 다시 선명하게)
+const DPR_MOVING = Math.min(window.devicePixelRatio, 1.25); // 돌리거나 여닫는 중: 가볍게
 renderer.setPixelRatio(DPR_FULL);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = LOOK.exposure;
