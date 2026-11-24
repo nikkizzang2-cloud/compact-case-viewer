@@ -19,33 +19,37 @@
 </script>
 <style>
   :root {
-    /* 레퍼런스 영상(블렌더 렌더)의 밝은 회색 스튜디오 배경 */
-    --stage-top: #c6c4c3;
-    --stage-bottom: #b2b0ae;
-    /* 배경 위아래 대비 강조: 위는 어둡게, 아래는 밝게 (0~1, 클수록 강하게) */
-    --bg-top-dark: 0.3;
-    --bg-bottom-light: 0.28;
-    /* 배경 보라 기운 (0 = 없음, 0.1 넘으면 눈에 띄게 보라) */
-    --bg-purple: 0.06;
+    --bg-fallback: #2a272b;
+    /* 배경 위에 덧씌우는 효과 (블렌더 렌더 배경을 그대로 보이게 지금은 모두 0)
+       위 어둡게 / 아래 밝게 / 보라 기운: 0~1 */
+    --bg-top-dark: 0;
+    --bg-bottom-light: 0;
+    --bg-purple: 0;
   }
-  html, body {
-    margin: 0; width: 100%; height: 100%; overflow: hidden;
-    background: var(--stage-bottom);
-    overscroll-behavior: none;
-    -webkit-user-select: none; user-select: none;
-    -webkit-touch-callout: none;
-    -webkit-tap-highlight-color: transparent;
-  }
-  #stage {
-    position: fixed; inset: 0;
-    /* 배경: 블렌더 렌더(레퍼런스 영상)의 배경을 제품 없이 복원한 이미지 (tools/make_background.py) */
+  /* 배경은 문서 맨 바탕(html)에 깔아서, 전체화면·주소창 유무·어떤 화면 크기에서도
+     화면 끝까지 꽉 채움. 비율이 다르면 가운데 기준으로 넘치는 쪽이 잘림 (cover) */
+  html {
+    min-height: 100%;
     background:
       linear-gradient(rgba(90, 50, 140, var(--bg-purple)), rgba(90, 50, 140, var(--bg-purple))),
       linear-gradient(to bottom,
         rgba(0, 0, 0, var(--bg-top-dark)) 0%,
         rgba(0, 0, 0, 0) 55%,
         rgba(255, 255, 255, var(--bg-bottom-light)) 100%),
-      var(--stage-bottom) url('background-blender.jpg') center / cover no-repeat;
+      var(--bg-fallback) url('background-render.jpg') center / cover no-repeat;
+  }
+  html:fullscreen, html:-webkit-full-screen { width: 100%; height: 100%; }
+  html::backdrop { background: var(--bg-fallback); }
+  html, body {
+    margin: 0; width: 100%; height: 100%; overflow: hidden;
+    overscroll-behavior: none;
+    -webkit-user-select: none; user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body { background: transparent; }
+  #stage {
+    position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; height: 100dvh;
     touch-action: none;
   }
   #stage canvas { display: block; width: 100%; height: 100%; }
@@ -112,9 +116,12 @@ const LOOK = {
 
 const stage = document.getElementById('stage');
 
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+// 아이패드처럼 화면 밀도가 2배 이상이면 계단 현상이 거의 안 보여서 안티앨리어싱(무거움)을 끔
+const renderer = new THREE.WebGLRenderer({
+  antialias: window.devicePixelRatio < 2, alpha: true, powerPreference: 'high-performance',
+});
 const DPR_FULL = Math.min(window.devicePixelRatio, 2);     // 멈춰 있을 때: 선명하게
-const DPR_MOVING = Math.min(window.devicePixelRatio, 1.25); // 돌리거나 여닫는 중: 가볍게
+const DPR_MOVING = 1; // 돌리거나 여닫는 중: 가볍게 (멈추면 다시 선명하게)
 renderer.setPixelRatio(DPR_FULL);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = LOOK.exposure;
