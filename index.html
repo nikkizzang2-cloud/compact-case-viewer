@@ -407,7 +407,7 @@ function frameCamera(model) {
   const box = new THREE.Box3().setFromObject(model);
   const center = box.getCenter(new THREE.Vector3());
   const radius = box.getSize(new THREE.Vector3()).length() / 2;
-  const dist = radius / Math.sin(THREE.MathUtils.degToRad(BASE_FOV / 2)) * 0.78;
+  const dist = radius / Math.sin(THREE.MathUtils.degToRad(BASE_FOV / 2)) * 0.821; // 0.78에서 제품 크기 5% 줄임
   center.y += radius * 0.15; // 열린 뚜껑이 위로 잘리지 않게 시선을 살짝 위로
   // 레퍼런스 영상과 비슷한 구도 (앞쪽 위에서 거울과 팬이 함께 보이는 각도)
   const theta = THREE.MathUtils.degToRad(-45), phi = THREE.MathUtils.degToRad(84);
