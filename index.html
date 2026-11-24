@@ -544,6 +544,18 @@ function toggle() {
 
 // 드래그와 탭 구분
 let down = false, moved = false, sx = 0, sy = 0, st = 0;
+// 전시용 전체화면: 웹앱(홈 화면 추가)으로도 아이패드 상단 시계/배터리는 못 숨김.
+// Safari의 전체화면 기능은 숨길 수 있지만 "사용자가 화면을 만졌을 때"만 켤 수 있음
+// → 화면을 처음 만지면 전체화면으로 전환 (나갔다가 다시 만지면 다시 전환)
+function enterFullscreen() {
+  const el = document.documentElement;
+  if (document.fullscreenElement || document.webkitFullscreenElement) return;
+  const req = el.requestFullscreen || el.webkitRequestFullscreen;
+  if (req) { try { const r = req.call(el); if (r && r.catch) r.catch(() => {}); } catch (e) {} }
+}
+document.addEventListener('pointerup', enterFullscreen, true);
+document.addEventListener('touchend', enterFullscreen, true);
+
 renderer.domElement.addEventListener('pointerdown', (e) => {
   down = true; moved = false; sx = e.clientX; sy = e.clientY; st = performance.now();
 });
