@@ -71,9 +71,9 @@ const LOOK = {
   pigment: { mottle: 0.05, speckle: 0.08, particles: 0.04, particleStrength: 0.18 },
   // tiltgrey 팬 = 글로우 제형 (젤리 같은 반투명 + 부드러운 유광)
   glow: {
-    color: 0x8a8c92,              // 겉색 (이전 값보다 한 단계 밝게)
+    color: 0x5e6065,              // 겉색 (투과를 끈 만큼 낮춰서, 화면에선 이전과 같은 밝기)
     depthColor: 0x8e9096,         // 속으로 비칠 때의 색 (깊이감)
-    transmission: 0.55,           // 속 비침 정도
+    transmission: 0,              // 속 비침 (0 = 끔: 켜면 장면을 한 번 더 그려서 아이패드에서 무거움)
     roughness: 0.14,
     coatSoftness: 0.03,           // 하이라이트 번짐 (클수록 부드럽게 퍼짐)
     // 립밤처럼 촉촉한 반사: 표면을 완전히 평평하지 않게, 아주 완만하고 불규칙하게 울퉁불퉁
@@ -113,7 +113,9 @@ const LOOK = {
 const stage = document.getElementById('stage');
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+const DPR_FULL = Math.min(window.devicePixelRatio, 2);     // 멈춰 있을 때: 선명하게
+const DPR_MOVING = Math.min(window.devicePixelRatio, 1.25); // 돌리거나 여닫는 중: 가볍게
+renderer.setPixelRatio(DPR_FULL);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = LOOK.exposure;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -134,6 +136,8 @@ function resize() {
 }
 // 변화가 있을 때만 다시 그림 (가만히 있을 땐 GPU를 안 씀)
 let needsRender = true;
+let motion = false;       // 이번 프레임에 회전/드래그가 있었는지
+controls.addEventListener('change', () => { motion = true; });
 function invalidate() { needsRender = true; }
 controls.addEventListener('change', invalidate);
 new ResizeObserver(resize).observe(stage);
@@ -238,7 +242,7 @@ loader.load('model.glb', (gltf) => {
   if (mirrorMesh) {
     action.time = 0; mixer.update(0); model.updateMatrixWorld(true);
     const panCenter = new THREE.Box3().setFromObject(panMesh || model).getCenter(new THREE.Vector3());
-    attachMirror(mirrorMesh, panCenter);
+    attachMirror(mirrorMesh, panCenter, { scale: 0.5 });
   }
 
   frameCamera(model);
@@ -266,6 +270,7 @@ function addGlowLight(mesh) {
 }
 
 let inReflection = false;
+let frameNo = 0, mirrorFrame = -1;
 // opts.overlay: 유광 표면처럼 원래 재질 위에 반사를 살짝 "더하기" (거울처럼 덮어쓰지 않음)
 function attachMirror(mesh, towardWorld, opts = {}) {
   // 이 메시는 평평한 원판이 아니라 벽이 있는 컵 모양이라,
@@ -319,7 +324,7 @@ function attachMirror(mesh, towardWorld, opts = {}) {
   const mirror = new Reflector(faceGeo, {
     color: opts.tint ?? LOOK.mirrorTint,
     textureWidth: Math.round(size.x * scale), textureHeight: Math.round(size.y * scale),
-    multisample: opts.blur ? 0 : 4, // 흐리게 쓸 반사는 안티앨리어싱 불필요
+    multisample: opts.blur ? 0 : 2,
   });
   if (opts.overlay) {
     // 기본 Reflector는 overlay 블렌드라 밝은 반사가 너무 세짐 → 단순 곱하기(반사 × 세기)로
@@ -355,7 +360,8 @@ function attachMirror(mesh, towardWorld, opts = {}) {
   const origBefore = mirror.onBeforeRender;
   mirror.onBeforeRender = function (...args) {
     // 반사 안에서 또 다른 반사면이 장면을 다시 그리는 연쇄를 막음 (지난 프레임 반사를 그대로 사용)
-    if (inReflection) return;
+    if (inReflection || mirrorFrame === frameNo) return; // 한 프레임에 한 번만 반사를 그림
+    mirrorFrame = frameNo;
     inReflection = true;
     const prev = scene.background;
     scene.background = mirrorBg;
@@ -546,6 +552,13 @@ renderer.domElement.addEventListener('pointerup', endPress);
 renderer.domElement.addEventListener('pointercancel', endPress);
 
 // ---- 렌더 루프 ----
+let lowRes = false, lastMotion = 0;
+function setLowRes(low) {
+  if (low === lowRes) return;
+  lowRes = low;
+  renderer.setPixelRatio(low ? DPR_MOVING : DPR_FULL);
+  renderer.setSize(stage.clientWidth, stage.clientHeight, false);
+}
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
   const dt = clock.getDelta();
@@ -558,10 +571,17 @@ renderer.setAnimationLoop(() => {
       mixer.update(0);
     }
     needsRender = true; // 뚜껑이 움직이는 동안은 계속 그림
+    motion = true;
   }
-  controls.update(); // 드래그/관성 회전 중이면 'change' 이벤트로 invalidate됨
+  controls.update(); // 드래그/관성 회전 중이면 'change' 이벤트로 invalidate + motion
+  // 움직이는 동안은 낮은 해상도, 멈추고 0.2초 지나면 선명하게 한 번 다시 그림
+  const now = performance.now();
+  if (motion) { lastMotion = now; setLowRes(true); }
+  else if (lowRes && now - lastMotion > 200) { setLowRes(false); needsRender = true; }
+  motion = false;
   if (!needsRender) return;
   needsRender = false;
+  frameNo++;
   // three.js 투과(글로우 반투명) 계산이 배경 지우는 색을 흰색 50%로 바꿔 놓아서,
   // 그대로 두면 배경 이미지 위에 반투명 회색 막이 씌워짐 → 매번 완전 투명으로 되돌림
   renderer.setClearColor(0x000000, 0);
