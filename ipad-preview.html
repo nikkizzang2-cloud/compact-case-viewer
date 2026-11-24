@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>아이패드 미리보기</title>
+<style>
+  /* 아이패드 에어 4세대 가로 화면(1180×820pt)을 그대로 축소해서 보여주는 확인용 페이지 */
+  html, body { margin: 0; height: 100%; background: #111; overflow: hidden; }
+  #frame {
+    position: absolute; left: 50%; top: 50%;
+    width: 1180px; height: 820px; border: 0;
+    border-radius: 18px; box-shadow: 0 0 0 10px #2a2a2a, 0 10px 40px rgba(0,0,0,.6);
+    transform-origin: center center;
+  }
+  .label { position: fixed; left: 12px; top: 10px; color: #888; font: 12px -apple-system, sans-serif; }
+</style>
+</head>
+<body>
+<div class="label">iPad Air (4세대) 가로 · 1180×820</div>
+<iframe id="frame"></iframe>
+<script>
+  const f = document.getElementById("frame");
+  f.src = "index.html?t=" + Date.now(); // 항상 최신 파일
+  function fit() {
+    const s = Math.min((innerWidth - 60) / 1180, (innerHeight - 60) / 820);
+    f.style.transform = `translate(-50%, -50%) scale(${s})`;
+  }
+  addEventListener('resize', fit); fit();
+</script>
+</body>
+</html>

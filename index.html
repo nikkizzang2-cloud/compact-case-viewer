@@ -1,0 +1,575 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<!-- 아이패드 에어 4세대 가로(1180×820pt) 전시용: 화면 확대/스크롤 막음 -->
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<!-- 홈 화면에 추가해서 열면 주소창 없이 전체 화면 -->
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<title>콤팩트 케이스</title>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<style>
+  :root {
+    /* 레퍼런스 영상(블렌더 렌더)의 밝은 회색 스튜디오 배경 */
+    --stage-top: #c6c4c3;
+    --stage-bottom: #b2b0ae;
+    /* 배경 위아래 대비 강조: 위는 어둡게, 아래는 밝게 (0~1, 클수록 강하게) */
+    --bg-top-dark: 0.3;
+    --bg-bottom-light: 0.28;
+    /* 배경 보라 기운 (0 = 없음, 0.1 넘으면 눈에 띄게 보라) */
+    --bg-purple: 0.06;
+  }
+  html, body {
+    margin: 0; width: 100%; height: 100%; overflow: hidden;
+    background: var(--stage-bottom);
+    overscroll-behavior: none;
+    -webkit-user-select: none; user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #stage {
+    position: fixed; inset: 0;
+    /* 배경: 블렌더 렌더(레퍼런스 영상)의 배경을 제품 없이 복원한 이미지 (tools/make_background.py) */
+    background:
+      linear-gradient(rgba(90, 50, 140, var(--bg-purple)), rgba(90, 50, 140, var(--bg-purple))),
+      linear-gradient(to bottom,
+        rgba(0, 0, 0, var(--bg-top-dark)) 0%,
+        rgba(0, 0, 0, 0) 55%,
+        rgba(255, 255, 255, var(--bg-bottom-light)) 100%),
+      var(--stage-bottom) url('background-blender.jpg') center / cover no-repeat;
+    touch-action: none;
+  }
+  #stage canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { Reflector } from 'three/addons/objects/Reflector.js';
+import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
+RectAreaLightUniformsLib.init(); // 사각 패널 조명(글로우 하이라이트)에 필요
+
+// ---- 레퍼런스(블렌더 렌더)에 맞춘 재질 값 ----
+const LOOK = {
+  powderBrown: 0xa47d5e,   // nudebeige: 베이지 매트 파우더 (0x987152에서 한 톤 밝게)
+  powderGrain: 0.35,       // 파우더 표면 미세 요철 세기
+  // 매트 파우더 피그먼트: 색 얼룩(큰 무늬) + 입자 하나하나의 밝기 차이 + 드문드문 진한/밝은 안료 알갱이
+  pigment: { mottle: 0.05, speckle: 0.08, particles: 0.04, particleStrength: 0.18 },
+  // tiltgrey 팬 = 글로우 제형 (젤리 같은 반투명 + 부드러운 유광)
+  glow: {
+    color: 0x8a8c92,              // 겉색 (이전 값보다 한 단계 밝게)
+    depthColor: 0x8e9096,         // 속으로 비칠 때의 색 (깊이감)
+    transmission: 0.55,           // 속 비침 정도
+    roughness: 0.14,
+    coatSoftness: 0.03,           // 하이라이트 번짐 (클수록 부드럽게 퍼짐)
+    // 립밤처럼 촉촉한 반사: 표면을 완전히 평평하지 않게, 아주 완만하고 불규칙하게 울퉁불퉁
+    // → 빛이 1자로 매끈하게 지나가지 않고 군데군데 번지고 끊기며 맺힘
+    unevenness: 0.15,             // 표면 굴곡 정도 (0 = 완전 평평, 0.3 넘으면 얼룩덜룩해 보임)
+    ior: 1.55,                    // 굴절률: 기본(1.5)보다 살짝 높여 오일감 있는 반사
+    unevenSeed: 11,               // 무늬 모양 (숫자 바꾸면 다른 무늬)
+    // 팬 안 제형의 곡률: 원래 완전 평면이라 빛이 꺾일 곳이 없음 →
+    // 가장자리로 갈수록 둥글게 말려 내려가게 해서 꺾이는 부분에 광이 맺히게
+    dome: {
+      // 음각: 가운데가 살짝 들어가고 가장자리가 벽 쪽으로 살짝 올라감 (음수 = 음각, 양수 = 양각)
+      width: 4,     // 테두리에서 안쪽으로 곡률이 들어가는 폭
+      depth: -0.15, // 가장자리 높이 변화 (음수 = 가장자리가 올라감)
+      tilt: -0.12,  // 가장자리 면의 기울기 (depth와 같은 부호로)
+    },
+  },
+  // 글로우 하이라이트를 만드는 큰 사각 패널 조명
+  glowLight: { intensity: 4.5, width: 120, height: 40, distance: 150 },
+  fillLight: 1.2,          // 팬을 밝혀주는 보조광 세기
+  // 반사용 스튜디오 환경: 어두운 벽 + 큰 소프트박스 (검은 유광 케이스가 깊어 보이게)
+  // lights: [경도, 위도, 가로반폭, 세로반폭, 밝기, 가장자리 부드러움] (도 단위)
+  // ※ 이 버전은 환경맵 위아래가 뒤집힌 채로 맞춘 룩이라, makeStudioEnv도 그 방식 그대로 둠
+  env: {
+    top: 0.3, wall: 0.2, floor: 0.06,
+    lights: [[-40, 45, 30, 18, 8, 8], [75, 15, 10, 30, 6, 5], [-120, 15, 8, 30, 4, 5],
+             [170, 30, 30, 12, 3, 8], [0, 80, 60, 6, 4, 6]],
+  },
+  mirrorTint: 0x8c8c8c,    // 거울 반사 밝기 (낮을수록 어두운 거울)
+  mirrorBackdrop: 0xbdbbb9, // 거울에 비치는 배경색 (무대 배경과 같은 회색)
+  exposure: 1.0,
+  animSpeed: 2.8,          // 뚜껑 여닫는 애니메이션 속도 (확정값)
+  // "Open" 애니메이션(0~5초) 중 어디서 멈출지. 5 = 끝까지 열기.
+  // 레퍼런스 영상처럼 거울에 팬이 크게 비치는 각도는 약 4.
+  openTime: 5.0,
+};
+
+const stage = document.getElementById('stage');
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = LOOK.exposure;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+stage.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 5000);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.enablePan = false;
+
+function resize() {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  invalidate();
+}
+// 변화가 있을 때만 다시 그림 (가만히 있을 땐 GPU를 안 씀)
+let needsRender = true;
+function invalidate() { needsRender = true; }
+controls.addEventListener('change', invalidate);
+new ResizeObserver(resize).observe(stage);
+resize();
+
+// 반사용 스튜디오 환경 (LOOK.env 값으로 코드에서 생성)
+scene.environment = makeStudioEnv(LOOK.env);
+// 보조광: 반사에는 거의 영향 없이 파우더 팬만 밝혀줌
+scene.add(new THREE.HemisphereLight(0xffffff, 0x555555, LOOK.fillLight));
+const key = new THREE.DirectionalLight(0xffffff, LOOK.fillLight);
+key.position.set(-1, 2, 1);
+scene.add(key);
+
+function makeStudioEnv(cfg) {
+  const W = 512, H = 256, data = new Float32Array(W * H * 4);
+  const sm = (e0, e1, x) => { const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
+  for (let y = 0; y < H; y++) {
+    const lat = 90 - (y + 0.5) / H * 180;
+    for (let x = 0; x < W; x++) {
+      const lon = (x + 0.5) / W * 360 - 180;
+      let v = lat >= 0
+        ? cfg.wall + (cfg.top - cfg.wall) * Math.pow(lat / 90, 1.5)
+        : cfg.floor + (cfg.wall - cfg.floor) * Math.pow(1 + lat / 90, 3);
+      for (const [clon, clat, hw, hh, inten, f] of cfg.lights) {
+        const dl = (((lon - clon + 540) % 360) - 180) * Math.cos(lat * Math.PI / 180);
+        v += inten * (1 - sm(-f, f, Math.abs(dl) - hw)) * (1 - sm(-f, f, Math.abs(lat - clat) - hh));
+      }
+      const i = (y * W + x) * 4;
+      data[i] = v; data[i + 1] = v * 0.99; data[i + 2] = v * 0.975; data[i + 3] = 1;
+    }
+  }
+  const tex = new THREE.DataTexture(data, W, H, THREE.RGBAFormat, THREE.FloatType);
+  tex.mapping = THREE.EquirectangularReflectionMapping;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+const draco = new DRACOLoader().setDecoderPath('draco/');
+const loader = new GLTFLoader().setDRACOLoader(draco);
+
+let mixer = null, action = null, isOpen = false;
+
+loader.load('model.glb', (gltf) => {
+  const model = gltf.scene;
+  scene.add(model);
+
+  let mirrorMesh = null, panMesh = null, glowMesh = null;
+  model.traverse((o) => {
+    if (!o.isMesh) return;
+    const m = o.material;
+    if (m.name === 'nudebeige') {
+      panMesh = o;
+      m.color.set(LOOK.powderBrown);
+      m.roughness = 0.95;
+      m.metalness = 0;
+      m.map = makePigmentTexture(LOOK.pigment);   // 피그먼트 색 입자
+      m.normalMap = makeGrainTexture();            // 눌러 담은 가루 표면의 미세 요철
+      m.normalMap.repeat.set(2, 2);
+      m.normalScale.set(LOOK.powderGrain, LOOK.powderGrain);
+    }
+    if (m.name === 'tiltgrey') {
+      // 글로우 제형: 젤리처럼 속이 살짝 비치는 반투명 + 부드럽게 번지는 유광 코팅
+      // (넓은 하이라이트는 아래 glowLight 패널 조명이 만들어 줌)
+      const g = LOOK.glow;
+      m.color.set(g.color);
+      m.metalness = 0;
+      m.roughness = g.roughness;
+      m.transmission = g.transmission;
+      m.thickness = 6;
+      m.attenuationColor.set(g.depthColor);
+      m.attenuationDistance = 4;
+      m.ior = g.ior;
+      m.specularColor.setRGB(1, 1, 1);
+      m.emissive.setRGB(0, 0, 0);
+      m.clearcoat = 1;
+      m.clearcoatRoughness = g.coatSoftness;
+      const surface = makeBalmSurfaceTexture(g.unevenSeed);
+      m.clearcoatNormalMap = surface;
+      m.clearcoatNormalScale.set(g.unevenness, g.unevenness);
+      surface.repeat.set(0.6, 0.6); // 굴곡을 크게 → 잔얼룩 없이 넓고 완만하게
+      m.sheen = 0.4;
+      m.sheenColor.setRGB(1, 1, 1);
+      m.sheenRoughness = 0.5;
+      m.specularIntensity = 1;
+      glowMesh = o;
+      domeSurface(o, g.dome);
+    }
+    // 같은 재질이 몸체 쪽에도 쓰여서, 뚜껑(cata_tilt2_lid) 안의 것만 거울로 사용
+    if (m.name === 'diffuse_0_0_0_255' && o.parent && /lid/i.test(o.parent.name)) mirrorMesh = o;
+  });
+
+  // 애니메이션
+  mixer = new THREE.AnimationMixer(model);
+  const clip = gltf.animations.find((a) => a.name === 'Open') || gltf.animations[0];
+  action = mixer.clipAction(clip);
+  action.setLoop(THREE.LoopOnce, 1);
+  action.clampWhenFinished = true;
+  action.play();
+  action.paused = true;
+
+  // 거울: 뚜껑이 닫힌 상태에서 파우더 팬을 내려다보는 면에 평면 반사를 붙임
+  if (mirrorMesh) {
+    action.time = 0; mixer.update(0); model.updateMatrixWorld(true);
+    const panCenter = new THREE.Box3().setFromObject(panMesh || model).getCenter(new THREE.Vector3());
+    attachMirror(mirrorMesh, panCenter);
+  }
+
+  frameCamera(model);
+  if (glowMesh) addGlowLight(glowMesh);
+  invalidate();
+}, undefined, (err) => {
+  console.error(err);
+});
+
+// 글로우 하이라이트용 큰 사각 패널 조명.
+// 기본 카메라에서 봤을 때 글로우 팬 표면에 정반사로 맺히는 자리에 둠 → 첫 화면에 부드러운 빛 덩어리,
+// 돌리면 그 빛이 표면을 따라 흐름. 검은 케이스 옆면에도 넓고 은은한 반사 띠를 만들어 줌.
+function addGlowLight(mesh) {
+  const L = LOOK.glowLight;
+  const center = new THREE.Box3().setFromObject(mesh).getCenter(new THREE.Vector3());
+  const nor = mesh.geometry.attributes.normal, t = new THREE.Vector3(), n = new THREE.Vector3();
+  for (let i = 0; i < nor.count; i++) n.add(t.fromBufferAttribute(nor, i));
+  n.normalize().transformDirection(mesh.matrixWorld);
+  const toCam = camera.position.clone().sub(center).normalize();
+  const reflectDir = toCam.reflect(n).negate();
+  const light = new THREE.RectAreaLight(0xffffff, L.intensity, L.width, L.height);
+  light.position.copy(center).addScaledVector(reflectDir, L.distance);
+  light.lookAt(center);
+  scene.add(light);
+}
+
+let inReflection = false;
+// opts.overlay: 유광 표면처럼 원래 재질 위에 반사를 살짝 "더하기" (거울처럼 덮어쓰지 않음)
+function attachMirror(mesh, towardWorld, opts = {}) {
+  // 이 메시는 평평한 원판이 아니라 벽이 있는 컵 모양이라,
+  // "파우더 팬 쪽을 향하는 평평한 면"의 정점만 골라서 거울 평면을 구함.
+  const geo = mesh.geometry;
+  const pos = geo.attributes.position, nor = geo.attributes.normal;
+  const toward = mesh.worldToLocal(towardWorld.clone());
+  const tmp = new THREE.Vector3(), v = new THREE.Vector3();
+  // 1) 팬 쪽을 향하는 법선들 중 가장 많은 방향(= 거울면 법선) 찾기
+  const N = [];
+  for (let i = 0; i < pos.count; i++) {
+    tmp.fromBufferAttribute(nor, i);
+    v.fromBufferAttribute(pos, i);
+    if (tmp.dot(toward.clone().sub(v)) > 0) N.push(i);
+  }
+  const step = Math.max(1, Math.floor(N.length / 400));
+  let best = null, bestCount = -1;
+  for (let a = 0; a < N.length; a += step) {
+    const na = new THREE.Vector3().fromBufferAttribute(nor, N[a]);
+    let cnt = 0;
+    for (let b = 0; b < N.length; b += step) if (tmp.fromBufferAttribute(nor, N[b]).dot(na) > 0.995) cnt++;
+    if (cnt > bestCount) { bestCount = cnt; best = na; }
+  }
+  const n = best.normalize();
+  // 2) 그 방향을 향하는 삼각형들만 뽑아서 "실제 거울면 모양" 그대로 반사면을 만듦
+  const isFace = (i) => tmp.fromBufferAttribute(nor, i).dot(n) > 0.99;
+  const idx = geo.index ? geo.index.array : [...Array(pos.count).keys()];
+  const tris = [];
+  for (let t = 0; t < idx.length; t += 3) {
+    if (isFace(idx[t]) && isFace(idx[t + 1]) && isFace(idx[t + 2])) tris.push(idx[t], idx[t + 1], idx[t + 2]);
+  }
+  // 거울면 로컬 좌표계: 법선 n이 +Z가 되도록 회전 (Reflector는 +Z를 반사면 법선으로 씀)
+  const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
+  const qInv = q.clone().invert();
+  const c = new THREE.Vector3();
+  tris.forEach((i) => c.add(tmp.fromBufferAttribute(pos, i)));
+  c.divideScalar(tris.length);
+  const flat = new Float32Array(tris.length * 3);
+  let maxZ = -Infinity;
+  tris.forEach((i, k) => {
+    tmp.fromBufferAttribute(pos, i).sub(c).applyQuaternion(qInv);
+    flat[k * 3] = tmp.x; flat[k * 3 + 1] = tmp.y; flat[k * 3 + 2] = 0; // 완전 평면으로
+    maxZ = Math.max(maxZ, tmp.z);
+  });
+  const faceGeo = new THREE.BufferGeometry();
+  faceGeo.setAttribute('position', new THREE.BufferAttribute(flat, 3));
+
+  const size = new THREE.Vector2();
+  renderer.getDrawingBufferSize(size);
+  const scale = opts.scale || 1;
+  const mirror = new Reflector(faceGeo, {
+    color: opts.tint ?? LOOK.mirrorTint,
+    textureWidth: Math.round(size.x * scale), textureHeight: Math.round(size.y * scale),
+    multisample: opts.blur ? 0 : 4, // 흐리게 쓸 반사는 안티앨리어싱 불필요
+  });
+  if (opts.overlay) {
+    // 기본 Reflector는 overlay 블렌드라 밝은 반사가 너무 세짐 → 단순 곱하기(반사 × 세기)로
+    mirror.material.fragmentShader = mirror.material.fragmentShader
+      .replace('blendOverlay( base.rgb, color )', 'base.rgb * color');
+    if (opts.blur) {
+      // 반사 이미지를 가우시안으로 흐려서, 비치는 물체가 형태 없이 "덩어리"로만 보이게
+      mirror.material.fragmentShader = mirror.material.fragmentShader.replace(
+        'vec4 base = texture2DProj( tDiffuse, vUv );',
+        `vec2 uv0 = vUv.xy / vUv.w;
+         vec4 base = vec4( 0.0 ); float wsum = 0.0;
+         for ( int x = -4; x <= 4; x ++ ) for ( int y = -4; y <= 4; y ++ ) {
+           float w = exp( - float( x * x + y * y ) / 8.0 );
+           base += texture2D( tDiffuse, uv0 + vec2( x, y ) * ${(opts.blur / 2).toFixed(5)} ) * w;
+           wsum += w;
+         }
+         base /= wsum;`);
+    }
+    mirror.material.transparent = true;
+    mirror.material.blending = THREE.AdditiveBlending;
+    mirror.material.depthWrite = false;
+  }
+  // 원래 면과 겹쳐 깜빡이지 않게 살짝 앞으로 + polygonOffset
+  mirror.position.copy(c).addScaledVector(n, maxZ + 0.02);
+  mirror.quaternion.copy(q);
+  mirror.material.side = THREE.DoubleSide; // 삼각형 감김 방향과 무관하게 보이도록
+  mirror.material.polygonOffset = true;
+  mirror.material.polygonOffsetFactor = -1;
+  mirror.material.polygonOffsetUnits = -4;
+  // 거울 안의 빈 공간은 레퍼런스처럼 밝은 회색 배경이 비치도록, 반사 렌더 때만 배경색을 켬
+  // (overlay 반사는 "더하기"라서 빈 공간은 검정 = 아무것도 안 더함)
+  const mirrorBg = new THREE.Color(opts.overlay ? 0x000000 : LOOK.mirrorBackdrop);
+  const origBefore = mirror.onBeforeRender;
+  mirror.onBeforeRender = function (...args) {
+    // 반사 안에서 또 다른 반사면이 장면을 다시 그리는 연쇄를 막음 (지난 프레임 반사를 그대로 사용)
+    if (inReflection) return;
+    inReflection = true;
+    const prev = scene.background;
+    scene.background = mirrorBg;
+    origBefore.apply(this, args);
+    scene.background = prev;
+    inReflection = false;
+  };
+  mesh.add(mirror);
+}
+
+function frameCamera(model) {
+  const box = new THREE.Box3().setFromObject(model);
+  const center = box.getCenter(new THREE.Vector3());
+  const radius = box.getSize(new THREE.Vector3()).length() / 2;
+  const dist = radius / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2)) * 0.78;
+  center.y += radius * 0.15; // 열린 뚜껑이 위로 잘리지 않게 시선을 살짝 위로
+  // 레퍼런스 영상과 비슷한 구도 (앞쪽 위에서 거울과 팬이 함께 보이는 각도)
+  const theta = THREE.MathUtils.degToRad(-45), phi = THREE.MathUtils.degToRad(84);
+  camera.position.set(
+    center.x + dist * Math.sin(phi) * Math.sin(theta),
+    center.y + dist * Math.cos(phi),
+    center.z + dist * Math.sin(phi) * Math.cos(theta));
+  camera.near = dist / 100; camera.far = dist * 10; camera.updateProjectionMatrix();
+  controls.target.copy(center);
+  controls.minDistance = dist * 0.5; controls.maxDistance = dist * 2;
+  controls.update();
+}
+
+// 파우더 입자감용 노멀맵 (작은 랜덤 노이즈)
+// 립밤 표면용 노멀맵: 부드러운 불규칙 노이즈(규칙적인 물결 X) → 촉촉하게 번지는 하이라이트
+// 평평한 윗면을 가장자리로 갈수록 둥글게 말려 내려가게 휨 (위치 + 법선)
+function domeSurface(mesh, cfg) {
+  const geo = mesh.geometry, pos = geo.attributes.position, nor = geo.attributes.normal;
+  const t = new THREE.Vector3();
+  // 1) 윗면 방향 = 가장 많은 법선 방향
+  let n = null, best = -1;
+  for (let a = 0; a < nor.count; a += 7) {
+    const na = new THREE.Vector3().fromBufferAttribute(nor, a);
+    let c = 0;
+    for (let b = 0; b < nor.count; b += 7) if (t.fromBufferAttribute(nor, b).dot(na) > 0.995) c++;
+    if (c > best) { best = c; n = na; }
+  }
+  n.normalize();
+  const isTop = new Uint8Array(pos.count);
+  for (let i = 0; i < pos.count; i++) if (t.fromBufferAttribute(nor, i).dot(n) > 0.99) isTop[i] = 1;
+  // 2) 윗면 테두리 선 찾기 (정점이 삼각형마다 따로라 위치로 같은 변을 판별)
+  const key = (i) => { t.fromBufferAttribute(pos, i); return `${Math.round(t.x * 200)},${Math.round(t.y * 200)},${Math.round(t.z * 200)}`; };
+  const edges = new Map(), idx = geo.index.array;
+  for (let k = 0; k < idx.length; k += 3) {
+    const tri = [idx[k], idx[k + 1], idx[k + 2]];
+    if (!tri.every((v) => isTop[v])) continue;
+    for (let e = 0; e < 3; e++) {
+      const a = tri[e], b = tri[(e + 1) % 3], ka = key(a), kb = key(b);
+      const kk = ka < kb ? ka + '|' + kb : kb + '|' + ka;
+      const cur = edges.get(kk);
+      edges.set(kk, cur ? { ...cur, n: cur.n + 1 } : { a, b, n: 1 });
+    }
+  }
+  // 윗면 평면 좌표계 (n = +Z)
+  const q = new THREE.Quaternion().setFromUnitVectors(n, new THREE.Vector3(0, 0, 1)), qi = q.clone().invert();
+  const flat = (i) => t.fromBufferAttribute(pos, i).clone().applyQuaternion(q);
+  const segs = [];
+  for (const e of edges.values()) if (e.n === 1) { const A = flat(e.a), B = flat(e.b); segs.push([A.x, A.y, B.x, B.y]); }
+  // 3) 테두리까지 거리에 따라 아래로 휘고, 법선을 바깥으로 기울임
+  for (let i = 0; i < pos.count; i++) {
+    if (!isTop[i]) continue;
+    const p = flat(i);
+    let bd = Infinity, bx = 0, by = 0;
+    for (const [x1, y1, x2, y2] of segs) {
+      const dx = x2 - x1, dy = y2 - y1;
+      const u = Math.max(0, Math.min(1, ((p.x - x1) * dx + (p.y - y1) * dy) / (dx * dx + dy * dy || 1)));
+      const cx = x1 + u * dx, cy = y1 + u * dy, d = Math.hypot(p.x - cx, p.y - cy);
+      if (d < bd) { bd = d; bx = cx - p.x; by = cy - p.y; }
+    }
+    if (bd >= cfg.width) continue;
+    const f = 1 - bd / cfg.width, len = Math.hypot(bx, by) || 1;
+    p.z -= cfg.depth * f * f;
+    const ang = cfg.tilt * f;
+    const nl = new THREE.Vector3(bx / len * Math.sin(ang), by / len * Math.sin(ang), Math.cos(ang));
+    p.applyQuaternion(qi); pos.setXYZ(i, p.x, p.y, p.z);
+    nl.applyQuaternion(qi); nor.setXYZ(i, nl.x, nl.y, nl.z);
+  }
+  pos.needsUpdate = true; nor.needsUpdate = true;
+  geo.computeBoundingSphere();
+}
+
+function makeBalmSurfaceTexture(seed) {
+  const s = 256, h = new Float32Array(s * s);
+  let rs = seed || 1;
+  const rnd = () => { rs = (rs * 16807) % 2147483647; return rs / 2147483647; };
+  let amp = 1, total = 0;
+  for (let o = 0; o < 3; o++) {           // 3단계: 큰 굴곡 + 중간 + 작은 굴곡
+    const g = 4 * Math.pow(2, o), grid = new Float32Array(g * g);
+    for (let i = 0; i < g * g; i++) grid[i] = rnd();
+    for (let y = 0; y < s; y++) for (let x = 0; x < s; x++) {
+      const fx = x / s * g, fy = y / s * g, x0 = Math.floor(fx), y0 = Math.floor(fy);
+      const tx = fx - x0, ty = fy - y0, sx = tx * tx * (3 - 2 * tx), sy = ty * ty * (3 - 2 * ty);
+      const at = (xx, yy) => grid[(yy % g) * g + (xx % g)];
+      h[y * s + x] += amp * ((at(x0, y0) * (1 - sx) + at(x0 + 1, y0) * sx) * (1 - sy)
+                           + (at(x0, y0 + 1) * (1 - sx) + at(x0 + 1, y0 + 1) * sx) * sy);
+    }
+    total += amp; amp *= 0.5;
+  }
+  const data = new Uint8Array(s * s * 4);
+  for (let y = 0; y < s; y++) for (let x = 0; x < s; x++) {
+    const dx = (h[y * s + (x + 1) % s] - h[y * s + (x - 1 + s) % s]) / total;
+    const dy = (h[((y + 1) % s) * s + x] - h[((y - 1 + s) % s) * s + x]) / total;
+    const i = (y * s + x) * 4;
+    data[i] = Math.max(0, Math.min(255, 128 - dx * 700));
+    data[i + 1] = Math.max(0, Math.min(255, 128 - dy * 700));
+    data[i + 2] = 255; data[i + 3] = 255;
+  }
+  const t = new THREE.DataTexture(data, s, s);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.needsUpdate = true;
+  return t;
+}
+
+// 매트 파우더 피그먼트 색 텍스처 (곱해지는 밝기 맵, 평균 ≈ 1이라 지정한 색은 유지)
+function makePigmentTexture(cfg) {
+  const s = 512, data = new Uint8Array(s * s * 4);
+  let rs = 3;
+  const rnd = () => { rs = (rs * 16807) % 2147483647; return rs / 2147483647; };
+  // 큰 얼룩: 저해상도 노이즈를 부드럽게 확대
+  const g = 16, grid = Array.from({ length: g * g }, rnd);
+  const mot = (x, y) => {
+    const fx = x / s * g, fy = y / s * g, x0 = Math.floor(fx), y0 = Math.floor(fy);
+    const tx = fx - x0, ty = fy - y0, sx = tx * tx * (3 - 2 * tx), sy = ty * ty * (3 - 2 * ty);
+    const at = (a, b) => grid[(b % g) * g + (a % g)];
+    return (at(x0, y0) * (1 - sx) + at(x0 + 1, y0) * sx) * (1 - sy) + (at(x0, y0 + 1) * (1 - sx) + at(x0 + 1, y0 + 1) * sx) * sy;
+  };
+  for (let y = 0; y < s; y++) for (let x = 0; x < s; x++) {
+    let v = 1 - cfg.mottle * 0.5 + cfg.mottle * mot(x, y);   // 색 얼룩
+    v += (rnd() - 0.5) * cfg.speckle;                         // 입자별 밝기 차이
+    if (rnd() < cfg.particles) v += (rnd() < 0.6 ? -1 : 1) * cfg.particleStrength * rnd(); // 진한/밝은 안료 알갱이
+    const c = Math.max(0, Math.min(255, Math.round(v * 248)));
+    const i = (y * s + x) * 4;
+    data[i] = data[i + 1] = data[i + 2] = c; data[i + 3] = 255;
+  }
+  const t = new THREE.DataTexture(data, s, s);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.magFilter = THREE.NearestFilter; // 알갱이가 뭉개지지 않게
+  t.generateMipmaps = true;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.needsUpdate = true;
+  return t;
+}
+
+function makeGrainTexture() {
+  const s = 256, data = new Uint8Array(s * s * 4);
+  for (let i = 0; i < s * s; i++) {
+    data[i * 4] = 128 + (Math.random() - 0.5) * 90;
+    data[i * 4 + 1] = 128 + (Math.random() - 0.5) * 90;
+    data[i * 4 + 2] = 255; data[i * 4 + 3] = 255;
+  }
+  const t = new THREE.DataTexture(data, s, s);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(6, 6);
+  t.needsUpdate = true;
+  return t;
+}
+
+// ---- 열기/닫기 ----
+function speed() { return LOOK.animSpeed; }
+
+function toggle() {
+  if (!action) return;
+  isOpen = !isOpen;
+  action.paused = false;
+  action.timeScale = (isOpen ? 1 : -1) * speed();
+}
+
+// 드래그와 탭 구분
+let down = false, moved = false, sx = 0, sy = 0, st = 0;
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  down = true; moved = false; sx = e.clientX; sy = e.clientY; st = performance.now();
+});
+renderer.domElement.addEventListener('pointermove', (e) => {
+  if (down && Math.abs(e.clientX - sx) + Math.abs(e.clientY - sy) > 12) moved = true; // 손가락 탭은 살짝 흔들려서 여유 있게
+});
+function endPress() {
+  if (!down) return;
+  down = false;
+  if (!moved && performance.now() - st < 500) toggle();
+}
+renderer.domElement.addEventListener('pointerup', endPress);
+renderer.domElement.addEventListener('pointercancel', endPress);
+
+// ---- 렌더 루프 ----
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  const dt = clock.getDelta();
+  if (mixer && !action.paused) {
+    mixer.update(dt);
+    // 열릴 때는 openTime에서 멈춤
+    if (isOpen && action.time >= LOOK.openTime) {
+      action.time = LOOK.openTime;
+      action.paused = true;
+      mixer.update(0);
+    }
+    needsRender = true; // 뚜껑이 움직이는 동안은 계속 그림
+  }
+  controls.update(); // 드래그/관성 회전 중이면 'change' 이벤트로 invalidate됨
+  if (!needsRender) return;
+  needsRender = false;
+  // three.js 투과(글로우 반투명) 계산이 배경 지우는 색을 흰색 50%로 바꿔 놓아서,
+  // 그대로 두면 배경 이미지 위에 반투명 회색 막이 씌워짐 → 매번 완전 투명으로 되돌림
+  renderer.setClearColor(0x000000, 0);
+  renderer.render(scene, camera);
+});
+
+// 디버그/확인용
+window.__viewer = { THREE, scene, camera, controls, renderer, get action() { return action; }, toggle, invalidate };
+</script>
+</body>
+</html>
