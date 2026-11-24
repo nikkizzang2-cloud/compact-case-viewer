@@ -31,16 +31,21 @@
     --edge-left: calc(-1 * env(safe-area-inset-left, 0px));
     --edge-right: calc(-1 * env(safe-area-inset-right, 0px));
   }
+  /* 페이지 바깥 여분 영역(브라우저 하단 띠 등)도 배경 아래쪽 색 흐름 그대로 채움
+     (배경 이미지 맨 아래 줄 색을 가로 그라데이션으로, 세로로 반복) */
+  html {
+    background: linear-gradient(to right, #979298 0%, #827d83 25%, #625d63 50%, #605e62 75%, #272629 100%);
+  }
   html, body {
     margin: 0; width: 100%; height: 100%; overflow: hidden;
-    background: var(--bg-fallback);
     overscroll-behavior: none;
     -webkit-user-select: none; user-select: none;
     -webkit-touch-callout: none;
     -webkit-tap-highlight-color: transparent;
   }
   html:fullscreen, html:-webkit-full-screen { width: 100%; height: 100%; }
-  html::backdrop { background: var(--bg-fallback); }
+  html::backdrop { background: linear-gradient(to right, #979298, #625d63, #272629); }
+  body { background: transparent; }
   /* 배경과 3D 화면 모두 화면 맨 끝(안전 영역 포함)까지 꽉 채움.
      비율이 다르면 가운데 기준으로 넘치는 쪽이 잘림 (cover) */
   #bg, #stage {
